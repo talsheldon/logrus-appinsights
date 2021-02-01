@@ -50,7 +50,7 @@ func main() {
 
 	// Send log to Application Insights
 	for {
-		log.WithFields(f).Error("my message")
+        log.WithFields(f).Log(log.ErrorLevel, "my message")
 		time.Sleep(time.Second * 1)
 	}
 }
