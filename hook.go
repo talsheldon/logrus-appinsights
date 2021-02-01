@@ -3,8 +3,9 @@ package logrus_appinsights
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/microsoft/ApplicationInsights-Go/appinsights/contracts"
 
-	"github.com/Microsoft/ApplicationInsights-Go/appinsights"
+	"github.com/microsoft/ApplicationInsights-Go/appinsights"
 	"github.com/sirupsen/logrus"
 )
 
@@ -14,14 +15,18 @@ var defaultLevels = []logrus.Level{
 	logrus.ErrorLevel,
 	logrus.WarnLevel,
 	logrus.InfoLevel,
+	logrus.DebugLevel,
+	logrus.TraceLevel,
 }
 
-var levelMap = map[logrus.Level]appinsights.SeverityLevel{
+var levelMap = map[logrus.Level]contracts.SeverityLevel{
 	logrus.PanicLevel: appinsights.Critical,
 	logrus.FatalLevel: appinsights.Critical,
 	logrus.ErrorLevel: appinsights.Error,
 	logrus.WarnLevel:  appinsights.Warning,
 	logrus.InfoLevel:  appinsights.Information,
+	logrus.DebugLevel: appinsights.Verbose,
+	logrus.TraceLevel: appinsights.Verbose,
 }
 
 // AppInsightsHook is a logrus hook for Application Insights
@@ -51,7 +56,7 @@ func New(name string, conf Config) (*AppInsightsHook, error) {
 	}
 	telemetryClient := appinsights.NewTelemetryClientFromConfig(telemetryConf)
 	if name != "" {
-		telemetryClient.Context().Cloud().SetRoleName(name)
+		telemetryClient.Context().Tags.Cloud().SetRole(name)
 	}
 	return &AppInsightsHook{
 		client:       telemetryClient,
@@ -71,7 +76,7 @@ func NewWithAppInsightsConfig(name string, conf *appinsights.TelemetryConfigurat
 	}
 	telemetryClient := appinsights.NewTelemetryClientFromConfig(conf)
 	if name != "" {
-		telemetryClient.Context().Cloud().SetRoleName(name)
+		telemetryClient.Context().Tags.Cloud().SetRole(name)
 	}
 	return &AppInsightsHook{
 		client:       telemetryClient,
@@ -122,7 +127,7 @@ func (hook *AppInsightsHook) fire(entry *logrus.Entry) error {
 	if err != nil {
 		return err
 	}
-	hook.client.TrackTraceTelemetry(trace)
+	hook.client.Track(trace)
 	return nil
 }
 
@@ -146,11 +151,10 @@ func (hook *AppInsightsHook) buildTrace(entry *logrus.Entry) (*appinsights.Trace
 		} else {
 			v = formatData(v) // use default formatter
 		}
-		vStr := fmt.Sprintf("%v", v)
-		trace.SetProperty(k, vStr)
+		trace.Properties[k] = fmt.Sprintf("%v", v)
 	}
-	trace.SetProperty("source_level", entry.Level.String())
-	trace.SetProperty("source_timestamp", entry.Time.String())
+	//trace.Properties["source_level"] = entry.Level.String()
+	//trace.Properties["source_timestamp"] = entry.Time.String()
 	return trace, nil
 }
 
