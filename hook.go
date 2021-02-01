@@ -1,6 +1,7 @@
 package logrus_appinsights
 
 import (
+	"code.cloudfoundry.org/clock"
 	"encoding/json"
 	"fmt"
 	"github.com/microsoft/ApplicationInsights-Go/appinsights/contracts"
@@ -123,11 +124,52 @@ func (hook *AppInsightsHook) Fire(entry *logrus.Entry) error {
 }
 
 func (hook *AppInsightsHook) fire(entry *logrus.Entry) error {
+	switch entry.Level {
+	case Dependency:
+		return hook.fireDependency(entry)
+	case Request:
+		return hook.fireRequest(entry)
+	default:
+	}
 	trace, err := hook.buildTrace(entry)
 	if err != nil {
 		return err
 	}
 	hook.client.Track(trace)
+	return nil
+}
+
+func (hook *AppInsightsHook) fireDependency(entry *logrus.Entry) error {
+	val, ok := entry.Data[DependencyKey]
+	if !ok {
+		return DependencyKeyDoesntExist
+	}
+	dependencyData, ok := val.(DependencyData)
+	if !ok {
+		return DependencyAssertionFailure
+	}
+	newRemoteDependency := appinsights.NewRemoteDependencyTelemetry(dependencyData.Name, dependencyData.dependencyType, dependencyData.target, dependencyData.success)
+	if requestID, ok := entry.Context.Value("request-id").(string); ok {
+		newRemoteDependency.Id = requestID
+	}
+	hook.client.Track(newRemoteDependency)
+	return nil
+}
+
+func (hook *AppInsightsHook) fireRequest(entry *logrus.Entry) error {
+	val, ok := entry.Data[RequestKey]
+	if !ok {
+		return RequestKeyDoesntExist
+	}
+	requestData, ok := val.(RequestData)
+	if !ok {
+		return RequestAssertionFailure
+	}
+	requestDependency := appinsights.NewRequestTelemetry(requestData.Method, requestData.Url, requestData.Duration, requestData.responseCode)
+	if requestID, ok := entry.Context.Value("request-id").(string); ok {
+		requestDependency.Id = requestID
+	}
+	hook.client.Track(requestDependency)
 	return nil
 }
 
@@ -174,4 +216,29 @@ func formatData(value interface{}) (formatted interface{}) {
 
 func stringPtr(str string) *string {
 	return &str
+}
+
+func (hook *AppInsightsHook) _appInsightException(msg interface{}, skip int, requestID string) {
+	switch msg.(type) {
+	case error, string, fmt.Stringer: // currently these are the only supported types in RequestError
+	default:
+		msg = fmt.Errorf("%v", msg)
+	}
+
+	properties := make(map[string]string)
+	properties["request-id"] = requestID
+	// defined explicitly due to https://github.com/microsoft/ApplicationInsights-Go/issues/47
+	hook.client.Track(&appinsights.ExceptionTelemetry{
+		Error:         msg,
+		Frames:        appinsights.GetCallstack(3 + skip),
+		SeverityLevel: appinsights.Error,
+		BaseTelemetry: appinsights.BaseTelemetry{
+			Timestamp:  clock.NewClock().Now(),
+			Tags:       make(contracts.ContextTags),
+			Properties: properties,
+		},
+		BaseTelemetryMeasurements: appinsights.BaseTelemetryMeasurements{
+			Measurements: make(map[string]float64),
+		},
+	})
 }
